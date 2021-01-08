@@ -5,8 +5,8 @@ build
 node_modules
 .cache
 dist
-package-lock.json
-website/index.merged.html
 website/index.html
+website/table.html
 
+.idea
 **/.DS_Store

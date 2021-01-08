@@ -1,72 +1,89 @@
-const fs = require('fs');
-const showdown = require('showdown');
+const fs = require('fs-extra');
 const cheerio = require('cheerio');
+const showdown = require('showdown');
 const Parcel = require('parcel-bundler');
+const { SitemapStream, streamToPromise } = require('sitemap');
 
 process.env.NODE_ENV = 'production';
 
-process.on('unhandledRejection', error => {
-  console.log('unhandledRejection', error.message);
-});
-
-const readme = 'README.md';
-const template = 'website/index.tmpl.html';
-const merged = 'website/index.html';
-const destination = 'website/index.html';
-
-const includeReadme = ({
-  md = readme,
-  templateHTML = template,
-  dest = merged,
-}) => {
-  const converter = new showdown.Converter({
-    omitExtraWLInCodeBlocks: true,
-    simplifiedAutoLink: true,
-    excludeTrailingPunctuationFromURLs: true,
-    literalMidWordUnderscores: true,
-    strikethrough: true,
-    tables: true,
-    tablesHeaderId: true,
-    ghCodeBlocks: true,
-    tasklists: true,
-    disableForced4SpacesIndentedSublists: true,
-    simpleLineBreaks: true,
-    requireSpaceBeforeHeadingText: true,
-    ghCompatibleHeaderId: true,
-    ghMentions: true,
-    backslashEscapesHTMLTags: true,
-    emoji: true,
-    splitAdjacentBlockquotes: true,
-  });
-  // converter.setFlavor('github');
-
-  console.log('Loading files...');
-  const indexTemplate = fs.readFileSync(templateHTML, 'utf8');
-  const markdown = fs.readFileSync(md, 'utf8');
-
-  console.log('Merging files...');
-  const $ = cheerio.load(indexTemplate);
-  $('#md').append(converter.makeHtml(markdown));
-
-  console.log('Writing index.html');
-  fs.writeFileSync(dest, $.html(), 'utf8');
-  console.log('DONE 👍');
+const LOG = {
+  error: (...args) => console.error('❌ ERROR', { ...args }),
+  debug: (...args) => {
+    if (process.env.DEBUG) console.log('💡 DEBUG: ', { ...args });
+  },
+};
+const handleFailure = (err) => {
+  LOG.error(err);
+  process.exit(1);
 };
 
-const bundle = (dest = destination) => {
-  console.log('');
-  console.log('Bundling with Parcel.js');
-  console.log('');
+process.on('unhandledRejection', handleFailure);
 
-  new Parcel(dest, {
+// --- FILES
+const README = 'README.md';
+const WEBSITE_FOLDER = 'website';
+const indexTemplate = `${WEBSITE_FOLDER}/index.tmpl.html`;
+const indexDestination = `${WEBSITE_FOLDER}/index.html`;
+
+async function processIndex() {
+  const converter = new showdown.Converter();
+  converter.setFlavor('github');
+
+  try {
+    LOG.debug('Loading files...', { indexTemplate, README });
+    const template = await fs.readFile(indexTemplate, 'utf8');
+    const markdown = await fs.readFile(README, 'utf8');
+
+    LOG.debug('Merging files...');
+    const $ = cheerio.load(template);
+    $('#md').append(converter.makeHtml(markdown));
+
+    LOG.debug('Writing index.html');
+    await fs.outputFile(indexDestination, $.html(), 'utf8');
+    LOG.debug('DONE 👍');
+  } catch (err) {
+    handleFailure(err);
+  }
+}
+
+const bundle = () => {
+  LOG.debug('---');
+  LOG.debug('📦  Bundling with Parcel.js');
+  LOG.debug('---');
+
+  new Parcel(indexDestination, {
     name: 'build',
     publicURL: '/',
-  }).bundle();
+  })
+    .bundle()
+    .then(() => {
+      const smStream = new SitemapStream({
+        hostname: 'https://awesome-docker.netlify.com/',
+      });
+      smStream.write({
+        url: '/',
+        changefreq: 'daily',
+        priority: 0.8,
+        lastmodrealtime: true,
+        lastmodfile: 'dist/index.html',
+      });
+
+      smStream.end();
+      return streamToPromise(smStream);
+    })
+    .then((sm) =>
+      // Creates a sitemap object given the input configuration with URLs
+      fs.outputFile(
+        'dist/sitemap.xml',
+        // sm.createSitemap(sitemapOpts).toString(),
+        sm.toString(),
+      ),
+    );
 };
 
-const main = () => {
-  includeReadme({});
-  bundle();
-};
+async function main() {
+  await processIndex();
+  await bundle();
+}
 
 main();
