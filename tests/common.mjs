@@ -1,8 +1,9 @@
-const fetch = require('node-fetch');
-const exclude = require('./exclude_in_test.json');
+import fetch from 'node-fetch';
+import { isRedirect } from 'node-fetch';
+import {readFileSync} from 'fs';
 
 const LINKS_OPTIONS = {
-  redirect: 'error',
+  redirect: 'manual',
   headers: {
     'Content-Type': 'application/json',
     'user-agent':
@@ -56,8 +57,9 @@ const partition = (arr, func) => {
 
 async function fetch_link(url) {
   try {
-    const { ok, statusText, redirected } = await fetch(url, LINKS_OPTIONS);
-    return [url, { ok, status: statusText, redirected }];
+    const { headers, ok, status, statusText } = await fetch(url, LINKS_OPTIONS);
+    const redirect = isRedirect(status) ? { redirect: { src: url, dst: headers.get("location") } } : {};
+    return [url, { ok, status: statusText, ...redirect }];
   } catch (error) {
     return [url, { ok: false, status: error.message }];
   }
@@ -78,6 +80,8 @@ async function batch_fetch({ arr, get, post_filter_func, BATCH_SIZE = 8 }) {
   return result;
 }
 
+const data = readFileSync('./tests/exclude_in_test.json')
+const exclude = JSON.parse(data)
 const exclude_length = exclude.length;
 const exclude_from_list = (link) => {
   let is_excluded = false;
@@ -90,7 +94,7 @@ const exclude_from_list = (link) => {
   return is_excluded;
 };
 
-module.exports = {
+export default {
   LOG,
   handleFailure,
   extract_all_links,
